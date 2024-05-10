@@ -6,42 +6,152 @@
 
 #define MAX_COMMANDS 200
 
-int main() {
+char** parse_command(char* command, int* len_result) {
+    int len = strlen(command);
+    int q_counter = 0;
+    int token_counter = 1;
+    for (int i = 0; i < len; i++) {
+        if (command[i] == '\"') {
+            q_counter++;
+        }
+        if ((command[i] == ' ') && (q_counter % 2 == 0)) {
+            token_counter++;
+        }
+    }
 
+    if (token_counter == 1) {
+        *len_result = 1;
+        char** result = (char**)malloc(sizeof(char*));
+        result[0] = strdup(command);
+        return result;
+    }
+
+    char** result = (char**)malloc(token_counter * sizeof(char*));
+    int token_idx = 0;
+    int src = 0;
+    for (int i = 0; i < len; i++) {
+        if (command[i] == '\"') {
+            q_counter++;
+        }
+        if (command[i] == ' ' && (q_counter % 2 == 0)) {
+            result[token_idx] = (char*)malloc(i - src + 1);
+            strncpy(result[token_idx], command + src, i - src);
+            result[token_idx][i - src] = '\0';
+
+            if (result[token_idx][0] == '\"' && result[token_idx][i - src - 1] == '\"') {
+                memmove(result[token_idx], result[token_idx] + 1, i - src - 1);
+                result[token_idx][i - src - 2] = '\0';
+            }
+            src = i + 1;
+            token_idx++;
+        }
+    }
+
+    result[token_idx] = (char*)malloc(len - src + 1);
+    strncpy(result[token_idx], command + src, len - src);
+    result[token_idx][len - src] = '\0';
+
+    if (result[token_idx][0] == '\"' && result[token_idx][len - src - 1] == '\"') {
+        memmove(result[token_idx], result[token_idx] + 1, len - src - 2);
+        result[token_idx][len - src - 2] = '\0';
+    }
+
+    *len_result = token_counter;
+    return result;
+}
+
+void add_null(char*** array, int* size) {
+    (*size)++;
+    *array = (char **) realloc(*array, (*size) * sizeof(char*));
+    (*array)[(*size) - 1] = NULL;
+}
+
+void trim_spaces(char* str) {
+    int start = 0, end = strlen(str) - 1;
+    while (str[start] == ' ') {
+        start++;
+    }
+    while (str[end] == ' ') {
+        end--;
+    }
+    for (int i = 0; i <= end - start; i++) {
+        str[i] = str[start + i];
+    }
+    str[end - start + 1] = '\0';
+}
+
+int main() {
     char command[256];
     char *commands[MAX_COMMANDS];
     int command_count = 0;
 
-    while (1) 
-    {
+    while (1) {
         printf("Shell> ");
-        
-        /*Reads a line of input from the user from the standard input (stdin) and stores it in the variable command */
         fgets(command, sizeof(command), stdin);
-        
-        /* Removes the newline character (\n) from the end of the string stored in command, if present. 
-           This is done by replacing the newline character with the null character ('\0').
-           The strcspn() function returns the length of the initial segment of command that consists of 
-           characters not in the string specified in the second argument ("\n" in this case). */
         command[strcspn(command, "\n")] = '\0';
 
-        /* Tokenizes the command string using the pipe character (|) as a delimiter using the strtok() function. 
-           Each resulting token is stored in the commands[] array. 
-           The strtok() function breaks the command string into tokens (substrings) separated by the pipe character |. 
-           In each iteration of the while loop, strtok() returns the next token found in command. 
-           The tokens are stored in the commands[] array, and command_count is incremented to keep track of the number of tokens found. */
         char *token = strtok(command, "|");
-        while (token != NULL) 
-        {
-            commands[command_count++] = token;
+        while (token != NULL) {
+            trim_spaces(token);
+            commands[command_count++] = strdup(token);
             token = strtok(NULL, "|");
         }
 
-        /* You should start programming from here... */
-        for (int i = 0; i < command_count; i++) 
-        {
-            printf("Command %d: %s\n", i, commands[i]);
-        }    
+        char** parsed_commands[command_count];
+        int lens[command_count];
+        for (int i = 0; i < command_count; i++) {
+            parsed_commands[i] = parse_command(commands[i], &lens[i]);
+            add_null(&parsed_commands[i], &lens[i]);
+        }
+
+        int pipes[command_count - 1][2];
+        for (int i = 0; i < command_count - 1; i++) {
+            if (pipe(pipes[i]) == -1) {
+                printf("Error al generar el pipe %i", i);
+                return -1;
+            }
+        }
+
+        int pids[command_count];
+        for (int i = 0; i < command_count; i++) {
+            pids[i] = fork();
+
+            if (pids[i] == -1) {
+                printf("Error en el fork del proceso %i", i);
+                return -1;
+            }
+
+            if (pids[i] == 0) { // algún proceso hijo
+                if (i != 0) {
+                    close(pipes[i - 1][1]);
+                    dup2(pipes[i - 1][0], 0);
+                    close(pipes[i - 1][0]);
+                }
+
+                if (i != command_count - 1) {
+                    close(pipes[i][0]);
+                    dup2(pipes[i][1], 1);
+                    close(pipes[i][1]);
+                }
+
+                execvp(parsed_commands[i][0], parsed_commands[i]);
+                printf("Falló la función execvp");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        for (int i = 0; i < command_count - 1; i++) {
+            close(pipes[i][0]);
+            close(pipes[i][1]);
+        }
+
+        for (int i = 0; i < command_count; i++) {
+            wait(NULL);
+            free(commands[i]);
+        }
+
+        command_count = 0;
     }
+
     return 0;
 }
