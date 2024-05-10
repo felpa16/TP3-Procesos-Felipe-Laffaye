@@ -8,7 +8,7 @@ int children(int n, int buffer, int start, int curr, int pipes[n][2]);
 
 int main(int argc, char **argv)
 {	
-	int start, status, pid, n;
+	int start, n;
 	int buffer[1];
 	
 	if (argc != 4){ printf("Uso: anillo <n> <c> <s> \n\n"); exit(0);}
